@@ -1,12 +1,14 @@
 import asyncio
+import sys
 import time
 from typing import Any
 
 import httpx
 
 _BASE = "https://api.ganjoor.net"
-_RATE_LIMIT = 1.0        # minimum seconds between requests
-_BACKOFF = (5, 15, 45)  # retry delays in seconds
+_RATE_LIMIT = 1.0         # minimum seconds between requests
+_BACKOFF = (5, 15, 45)   # retry delays for server errors (429/5xx)
+_CONNECTIVITY_RETRY = 30  # seconds to wait between connectivity retries
 
 _last_request_time: float = 0.0
 
@@ -26,9 +28,9 @@ class GanjoorClient:
     async def _get(self, path: str) -> Any | None:
         global _last_request_time
         url = _BASE + path
+        server_attempts = 0
 
-        for attempt in range(len(_BACKOFF) + 1):
-            # Enforce rate limit
+        while True:
             gap = _last_request_time + _RATE_LIMIT - time.monotonic()
             if gap > 0:
                 await asyncio.sleep(gap)
@@ -41,22 +43,29 @@ class GanjoorClient:
                     return resp.json()
 
                 if resp.status_code in (429, 500, 502, 503, 504):
-                    if attempt < len(_BACKOFF):
-                        await asyncio.sleep(_BACKOFF[attempt])
+                    if server_attempts < len(_BACKOFF):
+                        await asyncio.sleep(_BACKOFF[server_attempts])
+                        server_attempts += 1
                         continue
-                    return None  # exhausted retries
+                    return None  # exhausted server-error retries
 
                 # Non-retryable 4xx
                 return None
 
-            except httpx.RequestError:
+            except httpx.TransportError as exc:
+                # Network/connectivity issue — retry indefinitely until back online
                 _last_request_time = time.monotonic()
-                if attempt < len(_BACKOFF):
-                    await asyncio.sleep(_BACKOFF[attempt])
+                print(f"\n[connectivity] {exc!r} — retrying in {_CONNECTIVITY_RETRY}s", file=sys.stderr, flush=True)
+                await asyncio.sleep(_CONNECTIVITY_RETRY)
+
+            except httpx.RequestError:
+                # Protocol-level error — counts against server-error budget
+                _last_request_time = time.monotonic()
+                if server_attempts < len(_BACKOFF):
+                    await asyncio.sleep(_BACKOFF[server_attempts])
+                    server_attempts += 1
                     continue
                 return None
-
-        return None
 
     async def get_poets(self) -> list[dict] | None:
         return await self._get("/api/ganjoor/poets")
