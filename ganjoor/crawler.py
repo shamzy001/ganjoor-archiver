@@ -186,13 +186,20 @@ async def run_phase3(db_path: str) -> None:
 
         async with GanjoorClient() as client:
             async with db.execute(
+                "SELECT COUNT(*) FROM poems"
+            ) as cur:
+                total_poems = (await cur.fetchone())[0]
+
+            async with db.execute(
                 "SELECT id FROM poems WHERE fetched_at IS NULL"
             ) as cur:
                 poem_ids = [row[0] async for row in cur]
 
-            print(f"Phase 3 — fetching verses for {len(poem_ids)} poems...")
+            already_done = total_poems - len(poem_ids)
+            print(f"Phase 3 — fetching verses ({already_done}/{total_poems} already done, {len(poem_ids)} remaining)...")
 
-            for poem_id in tqdm(poem_ids, desc="  Poems", unit="poem"):
+            for poem_id in tqdm(poem_ids, desc="  Poems", unit="poem",
+                                total=total_poems, initial=already_done):
                 result = await client.get_poem(poem_id)
                 if result is None:
                     await log_failure(
