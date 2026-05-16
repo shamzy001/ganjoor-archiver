@@ -1,0 +1,17 @@
+# {{ cat.title }}
+
+{% if sub_categories %}
+## Sub-sections
+
+{% for sub in sub_categories %}
+- [[{{ sub.link }}/_index|{{ sub.title }}]]
+{% endfor %}
+
+{% endif %}
+{% if poems %}
+## Poems
+
+{% for poem in poems %}
+- [[{{ poem.link }}|{{ poem.title }}]]
+{% endfor %}
+{% endif %}

@@ -1,0 +1,5 @@
+httpx[asyncio]
+aiosqlite
+jinja2
+python-slugify
+tqdm

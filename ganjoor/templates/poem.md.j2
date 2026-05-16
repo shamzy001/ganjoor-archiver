@@ -1,0 +1,15 @@
+---
+title: "{{ poem.title }}"
+poet: "{{ poet.name }}"
+era: "{{ era }}"
+source: "{{ poem.source_url }}"
+tags:
+  - {{ poet_tag }}
+  - {{ era }}
+---
+
+# {{ poem.title }}
+
+{% for line in rendered_verses %}
+{{ line }}
+{% endfor %}

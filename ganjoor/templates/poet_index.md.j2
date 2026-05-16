@@ -1,0 +1,21 @@
+---
+title: "{{ poet.name }}"
+era: "{{ era }}"
+tags:
+  - {{ poet.slug }}
+  - {{ era }}
+---
+
+# {{ poet.name }}
+
+**{{ poet.slug }}** · {{ era }}{% if poet.birth_year_in_lh %} · b. {{ poet.birth_year_in_lh }} LH{% endif %}{% if poet.death_year_in_lh %} · d. {{ poet.death_year_in_lh }} LH{% endif %}
+
+{% if poet.description %}
+{{ poet.description }}
+
+{% endif %}
+## Works
+
+{% for cat in categories %}
+- [[{{ cat.link }}|{{ cat.title }}]]
+{% endfor %}

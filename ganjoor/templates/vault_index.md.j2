@@ -1,0 +1,10 @@
+# Ganjoor — Persian Poetry Archive
+
+{% for era, era_poets in poets_by_era.items() %}
+## {{ era }}
+
+{% for p in era_poets %}
+- [[poets/{{ p.slug }}/_index|{{ p.name }}]] ({{ p.slug }})
+{% endfor %}
+
+{% endfor %}

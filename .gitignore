@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Database & crawl artefacts
+*.db
+*.db-shm
+*.db-wal
+failures.log
+
+# Vault output
+vault/
+smoke-vault/
+
+# IDE
+.idea/
+.vscode/
+
+# Claude memory
+.claude/
