@@ -144,14 +144,44 @@ def _export_poet(
 
     top_cats = [cats[cid] for cid in children_of.get(root_id, []) if cid in cats]
     era = classify_era(poet.birth_year_in_lh)
+
+    # Poems sitting directly in the root category (rare but real — e.g. hajvname)
+    root_poem_rows = conn.execute(
+        "SELECT * FROM poems WHERE cat_id = ? AND fetched_at IS NOT NULL", (root_id,)
+    ).fetchall()
+    root_poems = [_poem_from_row(r) for r in root_poem_rows]
+
     w, s = _write(
         poet_dir / "_index.md",
         env.get_template("poet_index.md.j2").render(
-            poet=poet, era=era, categories=_cats_ctx(top_cats, poet)
+            poet=poet, era=era, categories=_cats_ctx(top_cats, poet),
+            poems=_poems_ctx(root_poems, poet),
         ),
         force,
     )
     written += w; skipped += s
+
+    for poem in root_poems:
+        verse_rows = conn.execute(
+            "SELECT * FROM verses WHERE poem_id = ? ORDER BY v_order", (poem.id,)
+        ).fetchall()
+        verses = [_verse_from_row(r) for r in verse_rows]
+        rendered = render_verses(verses)
+
+        poem_relative = poem.full_url[len(poet.full_url):].lstrip("/")
+        if not poem_relative:
+            poem_relative = poem.url_slug or str(poem.id)
+        poem_path = vault / "poets" / poet.slug / (poem_relative + ".md")
+
+        w, s = _write(
+            poem_path,
+            env.get_template("poem.md.j2").render(
+                poem=poem, poet=poet, era=era,
+                poet_tag=poet.slug, rendered_verses=rendered,
+            ),
+            force,
+        )
+        written += w; skipped += s
 
     stack = list(children_of.get(root_id, []))
     while stack:
