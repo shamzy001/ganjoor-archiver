@@ -1,8 +1,12 @@
+import os
 import sqlite3
+import sys
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
+from tqdm import tqdm
 
 from .era import classify_era
 from .models import Category, Poem, Poet, Verse
@@ -12,6 +16,7 @@ _ERA_ORDER = [
     "early-islamic", "khorasani", "seljuk", "ilkhanid-timurid",
     "safavid", "qajar", "modern", "unknown-era",
 ]
+_WORKERS = min(8, os.cpu_count() or 4)
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +114,7 @@ def _write(path: Path, content: str, force: bool) -> tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
-# Per-poet export
+# Per-poet export (uses its own DB connection — safe to call from any thread)
 # ---------------------------------------------------------------------------
 
 def _export_poet(
@@ -137,7 +142,6 @@ def _export_poet(
     poet_dir = vault / "poets" / poet.slug
     poet_dir.mkdir(parents=True, exist_ok=True)
 
-    # Poet _index.md — lists direct children of root category
     top_cats = [cats[cid] for cid in children_of.get(root_id, []) if cid in cats]
     era = classify_era(poet.birth_year_in_lh)
     w, s = _write(
@@ -149,7 +153,6 @@ def _export_poet(
     )
     written += w; skipped += s
 
-    # DFS over all non-root categories
     stack = list(children_of.get(root_id, []))
     while stack:
         cat_id = stack.pop()
@@ -169,7 +172,6 @@ def _export_poet(
         ).fetchall()
         poems = [_poem_from_row(r) for r in poem_rows]
 
-        # Category _index.md
         w, s = _write(
             cat_dir / "_index.md",
             env.get_template("book_index.md.j2").render(
@@ -181,7 +183,6 @@ def _export_poet(
         )
         written += w; skipped += s
 
-        # Poem files
         for poem in poems:
             verse_rows = conn.execute(
                 "SELECT * FROM verses WHERE poem_id = ? ORDER BY v_order", (poem.id,)
@@ -210,6 +211,18 @@ def _export_poet(
         stack.extend(sub_cat_ids)
 
     return written, skipped
+
+
+def _export_poet_worker(
+    db_path: str,
+    env: Environment,
+    poet: Poet,
+    vault: Path,
+    force: bool,
+) -> tuple[int, int]:
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        return _export_poet(conn, env, poet, vault, force)
 
 
 # ---------------------------------------------------------------------------
@@ -246,25 +259,46 @@ def export_vault(
             ).fetchall()
 
         poets = [_poet_from_row(r) for r in rows]
-        total_written = total_skipped = 0
 
-        for poet in poets:
-            w, s = _export_poet(conn, env, poet, vault, force)
-            total_written += w
-            total_skipped += s
+    total_written = total_skipped = 0
 
-        # vault/_index.md
-        poets_by_era: dict[str, list] = defaultdict(list)
-        for poet in sorted(poets, key=lambda p: p.name):
-            era = classify_era(poet.birth_year_in_lh)
-            poets_by_era[era].append({"name": poet.name, "slug": poet.slug})
+    workers = 1 if poet_filter else _WORKERS
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_export_poet_worker, db_path, env, poet, vault, force): poet
+            for poet in poets
+        }
+        with tqdm(total=len(poets), desc="  Poets", unit="poet") as pbar:
+            for future in as_completed(futures):
+                try:
+                    w, s = future.result()
+                    total_written += w
+                    total_skipped += s
+                except Exception as exc:
+                    poet = futures[future]
+                    tqdm.write(f"Warning: export failed for {poet.slug}: {exc}", file=sys.stderr)
+                finally:
+                    pbar.update(1)
 
-        ordered = {era: poets_by_era[era] for era in _ERA_ORDER if era in poets_by_era}
-        w, s = _write(
-            vault / "_index.md",
-            env.get_template("vault_index.md.j2").render(poets_by_era=ordered),
-            force,
-        )
-        total_written += w; total_skipped += s
+    # vault/_index.md — written in main thread after all poets complete
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM poets WHERE fetched_at IS NOT NULL ORDER BY name"
+        ).fetchall()
+        all_poets = [_poet_from_row(r) for r in rows]
+
+    poets_by_era: dict[str, list] = defaultdict(list)
+    for poet in all_poets:
+        era = classify_era(poet.birth_year_in_lh)
+        poets_by_era[era].append({"name": poet.name, "slug": poet.slug})
+
+    ordered = {era: poets_by_era[era] for era in _ERA_ORDER if era in poets_by_era}
+    w, s = _write(
+        vault / "_index.md",
+        env.get_template("vault_index.md.j2").render(poets_by_era=ordered),
+        force,
+    )
+    total_written += w; total_skipped += s
 
     print(f"Export complete: {total_written} written, {total_skipped} skipped")
