@@ -85,4 +85,4 @@
 - [x] 12.3 Run `python main.py crawl --phase 2` for a small poet (add a `--poet-id` debug flag if needed) — verify categories and poem stubs appear
 - [x] 12.4 Run `python main.py crawl --phase 3` on that poet's poems — verify verses are in DB
 - [x] 12.5 Run `python main.py export --poet {name_en} --vault smoke-vault/` — verify folder structure, frontmatter, verse formatting
-- [ ] 12.6 Open `smoke-vault/` in Obsidian and confirm: wiki-links resolve, verses render in blockquotes, era tags appear correctly
+- [x] 12.6 Open `smoke-vault/` in Obsidian and confirm: wiki-links resolve, verses render in blockquotes, era tags appear correctly
